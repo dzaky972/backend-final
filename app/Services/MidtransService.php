@@ -4,64 +4,64 @@ namespace App\Services;
 
 use Midtrans\Config;
 use Midtrans\Snap;
+use Midtrans\Notification;
 
 class MidtransService
 {
     public function __construct()
     {
         Config::$serverKey    = config('midtrans.server_key');
-        Config::$isProduction = (bool) config('midtrans.is_production', false);
-        Config::$isSanitized  = (bool) config('midtrans.is_sanitized', true);
-        Config::$is3ds        = (bool) config('midtrans.is_3ds', true);
+        Config::$clientKey    = config('midtrans.client_key');
+        Config::$isProduction = config('midtrans.is_production');
+        Config::$isSanitized  = config('midtrans.is_sanitized');
+        Config::$is3ds        = config('midtrans.is_3ds');
     }
 
     /**
-     * Create Snap transaction. Cukup 1× call ke Midtrans → dapat token + redirect_url sekaligus.
+     * Create a Snap transaction and return token + redirect URL.
      */
-    public function createSnapTransaction(array $params): array
+    public function createSnapTransaction(array $payload): array
     {
-        $payload = [
+        $params = [
             'transaction_details' => [
-                'order_id'     => $params['order_id'],
-                'gross_amount' => (int) $params['gross_amount'],
+                'order_id'     => $payload['order_id'],
+                'gross_amount' => $payload['gross_amount'],
             ],
             'customer_details' => [
-                'first_name' => $params['customer']['first_name'] ?? 'Customer',
-                'email'      => $params['customer']['email']      ?? 'noreply@example.com',
-                'phone'      => $params['customer']['phone']      ?? '',
+                'first_name' => $payload['customer']['first_name'],
+                'email'      => $payload['customer']['email'],
+                'phone'      => $payload['customer']['phone'],
             ],
-            'item_details' => $params['items'] ?? [],
-            'callbacks' => [
-                'finish' => $params['finish_url'] ?? config('app.frontend_url', 'http://localhost:5173'),
+            'item_details' => $payload['items'],
+            'callbacks'    => [
+                'finish' => $payload['finish_url'],
             ],
         ];
 
-        // createTransaction mengembalikan object {token, redirect_url}
-        $tx = Snap::createTransaction($payload);
+        $snapToken   = Snap::getSnapToken($params);
+        $redirectUrl = Config::$isProduction
+            ? "https://app.midtrans.com/snap/v2/vtweb/{$snapToken}"
+            : "https://app.sandbox.midtrans.com/snap/v2/vtweb/{$snapToken}";
 
         return [
-            'snap_token'   => $tx->token       ?? null,
-            'redirect_url' => $tx->redirect_url ?? null,
-            'client_key'   => config('midtrans.client_key'),
+            'snap_token'   => $snapToken,
+            'redirect_url' => $redirectUrl,
+            'client_key'   => Config::$clientKey,
         ];
     }
 
     /**
-     * Verify signature notifikasi Midtrans (sha512).
+     * Verify the SHA-512 signature from Midtrans webhook.
      */
     public function verifySignature(array $notification): bool
     {
-        $orderId      = $notification['order_id']      ?? '';
-        $statusCode   = $notification['status_code']   ?? '';
-        $grossAmount  = $notification['gross_amount']  ?? '';
-        $signatureKey = $notification['signature_key'] ?? '';
-        $serverKey    = config('midtrans.server_key', '');
-
-        if (empty($signatureKey) || empty($serverKey)) {
-            return false;
-        }
+        $orderId           = $notification['order_id'] ?? '';
+        $statusCode        = $notification['status_code'] ?? '';
+        $grossAmount       = $notification['gross_amount'] ?? '';
+        $serverKey         = config('midtrans.server_key');
 
         $expected = hash('sha512', $orderId . $statusCode . $grossAmount . $serverKey);
-        return hash_equals($expected, $signatureKey);
+
+        return $expected === ($notification['signature_key'] ?? '');
     }
 }
