@@ -7,6 +7,7 @@ use App\Http\Controllers\Api\JasaController;
 use App\Http\Controllers\Api\PemesananController;
 use App\Http\Controllers\Api\PengaturanController;
 use App\Http\Controllers\Api\PortofolioController;
+use App\Http\Controllers\Api\UploadController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
@@ -32,14 +33,14 @@ Route::post('/login',    [AuthController::class, 'login']);
 
 Route::get('/jasa',                  [JasaController::class, 'index']);
 Route::get('/jasa/{id}',             [JasaController::class, 'show']);
-Route::get('/jasa/{id}/jadwal',      [JadwalController::class, 'checkJadwal']); // cek tanggal available
+Route::get('/jasa/{id}/jadwal',      [JadwalController::class, 'checkJadwal']);
 
 Route::get('/portofolio',            [PortofolioController::class, 'index']);
 Route::get('/portofolio/{id}',       [PortofolioController::class, 'show']);
 
 Route::get('/pengaturan',            [PengaturanController::class, 'index']);
 
-// Webhook Midtrans (tanpa auth — di-validate signature)
+// Webhook Midtrans
 Route::post('/midtrans/notification', [PemesananController::class, 'midtransNotification']);
 
 // ─────────────────────────────────────────────────────────
@@ -47,14 +48,13 @@ Route::post('/midtrans/notification', [PemesananController::class, 'midtransNoti
 // ─────────────────────────────────────────────────────────
 Route::middleware('auth:sanctum')->group(function () {
 
-    // Universal — admin & pelanggan sama-sama bisa
     Route::get('/me',       [AuthController::class, 'me']);
     Route::post('/logout',  [AuthController::class, 'logout']);
     Route::put('/profile',  [AuthController::class, 'updateProfile']);
     Route::put('/password', [AuthController::class, 'changePassword']);
 
     // ─────────────────────────────────────────────────────
-    //  ROUTE PEMESANAN — pelanggan only (admin diblokir di controller)
+    //  ROUTE PEMESANAN — pelanggan only
     // ─────────────────────────────────────────────────────
     Route::get('/pemesanan',                 [PemesananController::class, 'index']);
     Route::get('/pemesanan/{id}',            [PemesananController::class, 'show']);
@@ -64,12 +64,17 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/pemesanan/{id}/cancel',    [PemesananController::class, 'cancel']);
 
     // ─────────────────────────────────────────────────────
-    //  ROUTE ADMIN — wajib admin (closure middleware)
+    //  ROUTE ADMIN — wajib admin
     // ─────────────────────────────────────────────────────
     Route::prefix('admin')->middleware([\App\Http\Middleware\EnsureUserIsAdmin::class])->group(function () {
         Route::get('/dashboard',   [AdminController::class, 'dashboard']);
         Route::get('/pelanggan',   [AdminController::class, 'listPelanggan']);
         Route::get('/laporan',     [AdminController::class, 'laporan']);
+
+        // ── UPLOAD GAMBAR (BARU) ────────────────────────────
+        Route::post('/upload',   [UploadController::class, 'store']);
+        Route::delete('/upload', [UploadController::class, 'destroy']);
+        // ────────────────────────────────────────────────────
 
         // CRUD Jasa
         Route::get('/jasa',              [JasaController::class, 'index']);

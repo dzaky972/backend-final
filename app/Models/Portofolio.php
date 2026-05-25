@@ -17,6 +17,7 @@ class Portofolio extends Model
         'tanggal_proyek',
         'icon',
         'img_bg',
+        'gambar',          // ← BARU: path file gambar (nullable)
         'tag',
         'tag_color',
         'is_featured',

@@ -71,6 +71,7 @@ class JasaController extends Controller
 
     /**
      * Update jasa (admin).
+     * Kalau field 'gambar' diubah & gambar lama ada, hapus file lama dari storage.
      */
     public function update(Request $request, $id)
     {
@@ -88,7 +89,14 @@ class JasaController extends Controller
             return response()->json(['status' => 'error', 'message' => 'Validasi gagal', 'errors' => $validator->errors()], 422);
         }
 
-        $jasa->update($validator->validated());
+        $validated = $validator->validated();
+
+        // Jika ada perubahan gambar → hapus file lama agar tidak menumpuk
+        if (array_key_exists('gambar', $validated) && $validated['gambar'] !== $jasa->gambar) {
+            UploadController::deleteFile($jasa->gambar);
+        }
+
+        $jasa->update($validated);
 
         return response()->json([
             'status'  => 'success',
@@ -121,6 +129,9 @@ class JasaController extends Controller
                 'data'    => $this->formatJasa($jasa->fresh()),
             ]);
         }
+
+        // Hard delete: hapus juga file gambar dari storage
+        UploadController::deleteFile($jasa->gambar);
 
         $jasa->delete();
         return response()->json(['status' => 'success', 'message' => 'Jasa berhasil dihapus permanen']);
@@ -168,6 +179,7 @@ class JasaController extends Controller
             'tag'               => "$opt|string|max:100",
             'tag_color'         => "$opt|string|max:50",
             'img_bg'            => "$opt|string|max:500",
+            'gambar'            => "$opt|string|max:255", // ← BARU: path file dari UploadController
             'features'          => "$opt|array",
             'features.*'        => 'string|max:200',
             'packages'          => "$opt|array",
@@ -208,6 +220,10 @@ class JasaController extends Controller
             'tag_color'       => $jasa->tag_color ?: '#1B4FD8',
             'imgBg'           => $jasa->img_bg ?: 'linear-gradient(135deg,#1a2a6c,#1B4FD8 60%,#23d5ab)',
             'img_bg'          => $jasa->img_bg ?: 'linear-gradient(135deg,#1a2a6c,#1B4FD8 60%,#23d5ab)',
+            // ── Field gambar (BARU) ──────────────────────────────
+            'gambar'          => $jasa->gambar,                                       // path mentah (untuk admin form)
+            'gambar_url'      => $jasa->gambar ? asset('storage/' . $jasa->gambar) : null, // URL siap pakai untuk <img>
+            // ─────────────────────────────────────────────────────
             'features'        => is_array($jasa->features) ? array_values($jasa->features) : [],
             'packages'        => is_array($jasa->packages) ? array_values($jasa->packages) : [],
             'addons'          => is_array($jasa->addons)   ? array_values($jasa->addons)   : [],

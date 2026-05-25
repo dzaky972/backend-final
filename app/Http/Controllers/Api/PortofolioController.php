@@ -42,19 +42,7 @@ class PortofolioController extends Controller
      */
     public function store(Request $request)
     {
-        $validator = Validator::make($request->all(), [
-            'judul'          => 'required|string|max:255',
-            'deskripsi'      => 'nullable|string',
-            'kategori'       => 'nullable|string|max:100',
-            'klien'          => 'nullable|string|max:200',
-            'tanggal_proyek' => 'nullable|date',
-            'icon'           => 'nullable|string|max:10',
-            'img_bg'         => 'nullable|string|max:500',
-            'tag'            => 'nullable|string|max:100',
-            'tag_color'      => 'nullable|string|max:20',
-            'is_featured'    => 'nullable|boolean',
-            'urutan'         => 'nullable|integer',
-        ]);
+        $validator = Validator::make($request->all(), $this->rules(false));
 
         if ($validator->fails()) {
             return response()->json(['status' => 'error', 'message' => 'Validasi gagal', 'errors' => $validator->errors()], 422);
@@ -71,31 +59,27 @@ class PortofolioController extends Controller
 
     /**
      * ADMIN: Update.
+     * Hapus file gambar lama otomatis bila diganti.
      */
     public function update(Request $request, $id)
     {
         $p = Portofolio::find($id);
         if (!$p) return response()->json(['status' => 'error', 'message' => 'Portofolio tidak ditemukan'], 404);
 
-        $validator = Validator::make($request->all(), [
-            'judul'          => 'sometimes|string|max:255',
-            'deskripsi'      => 'sometimes|nullable|string',
-            'kategori'       => 'sometimes|nullable|string|max:100',
-            'klien'          => 'sometimes|nullable|string|max:200',
-            'tanggal_proyek' => 'sometimes|nullable|date',
-            'icon'           => 'sometimes|nullable|string|max:10',
-            'img_bg'         => 'sometimes|nullable|string|max:500',
-            'tag'            => 'sometimes|nullable|string|max:100',
-            'tag_color'      => 'sometimes|nullable|string|max:20',
-            'is_featured'    => 'sometimes|boolean',
-            'urutan'         => 'sometimes|integer',
-        ]);
+        $validator = Validator::make($request->all(), $this->rules(true));
 
         if ($validator->fails()) {
             return response()->json(['status' => 'error', 'message' => 'Validasi gagal', 'errors' => $validator->errors()], 422);
         }
 
-        $p->update($validator->validated());
+        $validated = $validator->validated();
+
+        // Jika ada perubahan gambar → hapus file lama
+        if (array_key_exists('gambar', $validated) && $validated['gambar'] !== $p->gambar) {
+            UploadController::deleteFile($p->gambar);
+        }
+
+        $p->update($validated);
 
         return response()->json([
             'status'  => 'success',
@@ -105,15 +89,39 @@ class PortofolioController extends Controller
     }
 
     /**
-     * ADMIN: Delete.
+     * ADMIN: Delete (hapus juga file gambar dari storage).
      */
     public function destroy($id)
     {
         $p = Portofolio::find($id);
         if (!$p) return response()->json(['status' => 'error', 'message' => 'Portofolio tidak ditemukan'], 404);
 
+        UploadController::deleteFile($p->gambar);
+
         $p->delete();
         return response()->json(['status' => 'success', 'message' => 'Portofolio dihapus']);
+    }
+
+    /* ─────────────────────────────────────────── */
+
+    private function rules(bool $partial = false): array
+    {
+        $req = $partial ? 'sometimes' : 'required';
+        $opt = $partial ? 'sometimes|nullable' : 'nullable';
+        return [
+            'judul'          => "$req|string|max:255",
+            'deskripsi'      => "$opt|string",
+            'kategori'       => "$opt|string|max:100",
+            'klien'          => "$opt|string|max:200",
+            'tanggal_proyek' => "$opt|date",
+            'icon'           => "$opt|string|max:10",
+            'img_bg'         => "$opt|string|max:500",
+            'gambar'         => "$opt|string|max:255", // ← BARU
+            'tag'            => "$opt|string|max:100",
+            'tag_color'      => "$opt|string|max:20",
+            'is_featured'    => "$opt|boolean",
+            'urutan'         => "$opt|integer",
+        ];
     }
 
     private function format(Portofolio $p): array
@@ -122,7 +130,7 @@ class PortofolioController extends Controller
             'id'             => $p->id_portofolio,
             'id_portofolio'  => $p->id_portofolio,
             'judul'          => $p->judul,
-            'label'          => $p->judul, // alias untuk frontend
+            'label'          => $p->judul,
             'deskripsi'      => $p->deskripsi,
             'kategori'       => $p->kategori,
             'klien'          => $p->klien,
@@ -130,6 +138,10 @@ class PortofolioController extends Controller
             'icon'           => $p->icon ?: '🎬',
             'img_bg'         => $p->img_bg,
             'imgBg'          => $p->img_bg,
+            // ── Field gambar (BARU) ──────────────────────────────
+            'gambar'         => $p->gambar,
+            'gambar_url'     => $p->gambar ? asset('storage/' . $p->gambar) : null,
+            // ─────────────────────────────────────────────────────
             'tag'            => $p->tag,
             'tag_color'      => $p->tag_color,
             'tagColor'       => $p->tag_color,

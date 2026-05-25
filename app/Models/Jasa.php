@@ -19,6 +19,7 @@ class Jasa extends Model
         'tag',
         'tag_color',
         'img_bg',
+        'gambar',          // ← BARU: path file gambar (nullable)
         'features',
         'packages',
         'addons',
