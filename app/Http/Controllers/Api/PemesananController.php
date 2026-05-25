@@ -98,7 +98,6 @@ class PemesananController extends Controller
             'id_jasa'           => 'required|integer|exists:jasa,id_jasa',
             'paket_id'          => 'required|string|max:50',
             'paket_label'       => 'nullable|string|max:100',
-            // paket_price diabaikan; kita hitung dari config jasa
             'addons'            => 'nullable|array',
             'addons.*.id'       => 'required_with:addons|string|max:50',
             'addons.*.name'     => 'nullable|string|max:100',
@@ -192,6 +191,7 @@ class PemesananController extends Controller
                 'waktu_pelaksanaan' => $data['waktu_pelaksanaan'],
                 'total_harga'       => $total,
                 'status_pesanan'    => 'menunggu',
+                // sub_status_pesanan: tidak diisi karena status awal = 'menunggu'
                 'nama_pic'          => $data['nama_pic'],
                 'telepon_pic'       => $data['telepon_pic'],
                 'perusahaan'        => $data['perusahaan'] ?? null,
@@ -228,6 +228,14 @@ class PemesananController extends Controller
 
     /**
      * Update status pesanan (admin).
+     *
+     * MENERIMA 2 FIELD:
+     *   - status_pesanan (required)     : menunggu|proses|selesai|batal
+     *   - sub_status_pesanan (optional) : dikonfirmasi|persiapan|berlangsung|acara_selesai
+     *
+     * LOGIKA:
+     *   - Kalau status_pesanan='proses' → sub_status WAJIB ada (default 'dikonfirmasi')
+     *   - Kalau status_pesanan bukan 'proses' → sub_status di-reset ke null
      */
     public function updateStatus(Request $request, $id)
     {
@@ -236,7 +244,8 @@ class PemesananController extends Controller
         }
 
         $validator = Validator::make($request->all(), [
-            'status_pesanan' => 'required|in:menunggu,proses,selesai,batal',
+            'status_pesanan'     => 'required|in:menunggu,proses,selesai,batal',
+            'sub_status_pesanan' => 'nullable|in:dikonfirmasi,persiapan,berlangsung,acara_selesai',
         ]);
         if ($validator->fails()) {
             return response()->json(['status' => 'error', 'errors' => $validator->errors()], 422);
@@ -248,6 +257,16 @@ class PemesananController extends Controller
         }
 
         $pesanan->status_pesanan = $request->status_pesanan;
+
+        // Logika sub_status:
+        if ($request->status_pesanan === 'proses') {
+            // Kalau status='proses', sub_status wajib ada → default ke 'dikonfirmasi'
+            $pesanan->sub_status_pesanan = $request->sub_status_pesanan ?? 'dikonfirmasi';
+        } else {
+            // Untuk status menunggu/selesai/batal → reset sub_status ke null
+            $pesanan->sub_status_pesanan = null;
+        }
+
         $pesanan->save();
         $pesanan->load(['details.jasa', 'pembayaran', 'user.pelanggan']);
 
@@ -291,6 +310,7 @@ class PemesananController extends Controller
         }
 
         $pesanan->status_pesanan = 'batal';
+        $pesanan->sub_status_pesanan = null;
         $pesanan->save();
         $pesanan->load(['details.jasa', 'pembayaran', 'user.pelanggan']);
 
@@ -401,6 +421,7 @@ class PemesananController extends Controller
 
     /**
      * Webhook Midtrans (tanpa auth).
+     * Saat pembayaran sukses → otomatis set status='proses' & sub_status='dikonfirmasi'.
      */
     public function midtransNotification(Request $request, MidtransService $midtrans)
     {
@@ -443,7 +464,8 @@ class PemesananController extends Controller
         if ($newStatus === 'success') {
             $pemesanan = $pembayaran->pemesanan;
             if ($pemesanan && $pemesanan->status_pesanan === 'menunggu') {
-                $pemesanan->status_pesanan = 'proses';
+                $pemesanan->status_pesanan      = 'proses';
+                $pemesanan->sub_status_pesanan  = 'dikonfirmasi'; // ← Default setelah pembayaran berhasil
                 $pemesanan->save();
             }
         }
@@ -508,10 +530,15 @@ class PemesananController extends Controller
             'tgl_pelaksanaan_raw' => $p->tgl_pelaksanaan?->toDateString(),
             'waktu_pelaksanaan'   => $p->waktu_pelaksanaan,
 
-            'total'          => (float) $p->total_harga,
-            'total_harga'    => (float) $p->total_harga,
-            'status'         => $p->status_pesanan,
-            'status_pesanan' => $p->status_pesanan,
+            'total'              => (float) $p->total_harga,
+            'total_harga'        => (float) $p->total_harga,
+            'status'             => $p->status_pesanan,
+            'status_pesanan'     => $p->status_pesanan,
+            // ── Field BARU untuk status detail ──────────────────
+            'sub_status'         => $p->sub_status_pesanan,
+            'sub_status_pesanan' => $p->sub_status_pesanan,
+            'display_status'     => $this->computeDisplayStatus($p), // key gabungan untuk frontend
+            // ─────────────────────────────────────────────────────
 
             'company'        => $p->perusahaan ?? '-',
             'perusahaan'     => $p->perusahaan,
@@ -552,5 +579,35 @@ class PemesananController extends Controller
                 'perusahaan' => $p->user->pelanggan?->perusahaan,
             ] : null,
         ];
+    }
+
+    /**
+     * Hitung "display status" — key yang dipakai frontend untuk render badge/label.
+     * Hasilnya salah satu dari 7 nilai:
+     *   menunggu_pembayaran | dikonfirmasi | persiapan | berlangsung |
+     *   acara_selesai | selesai | batal
+     */
+    private function computeDisplayStatus(Pemesanan $p): string
+    {
+        $status    = $p->status_pesanan;
+        $subStatus = $p->sub_status_pesanan;
+
+        if ($status === 'batal')   return 'batal';
+        if ($status === 'selesai') return 'selesai';
+
+        if ($status === 'menunggu') {
+            // Cek pembayaran: kalau sudah success (jarang terjadi karena webhook
+            // biasanya sudah ngeset status ke 'proses', tapi handle untuk safety)
+            $payStatus = $p->pembayaran?->status_verifikasi;
+            if ($payStatus === 'success') return 'dikonfirmasi';
+            return 'menunggu_pembayaran';
+        }
+
+        // status_pesanan === 'proses' → mapping dari sub_status
+        if ($status === 'proses') {
+            return $subStatus ?: 'dikonfirmasi';
+        }
+
+        return 'menunggu_pembayaran';
     }
 }

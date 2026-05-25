@@ -17,6 +17,7 @@ class Pemesanan extends Model
         'waktu_pelaksanaan',
         'total_harga',
         'status_pesanan',
+        'sub_status_pesanan', // ← BARU: dikonfirmasi|persiapan|berlangsung|acara_selesai
         'nama_pic',
         'telepon_pic',
         'perusahaan',
@@ -42,16 +43,5 @@ class Pemesanan extends Model
     public function pembayaran()
     {
         return $this->hasOne(Pembayaran::class, 'id_pemesanan', 'id_pemesanan');
-    }
-
-    public function hitungTotal(): float
-    {
-        return $this->details->sum('subtotal');
-    }
-
-    public function updateStatus(string $status): bool
-    {
-        $this->status_pesanan = $status;
-        return $this->save();
     }
 }
